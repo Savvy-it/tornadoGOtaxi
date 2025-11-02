@@ -1,5 +1,7 @@
 {
   "name": "Tornado Taxi APP",
   "description": "A modern, sleek taxi booking application for passengers and drivers. Book a ride in seconds or earn money driving with Tornado Taxi. Safe, reliable, and always available.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [
+    "geolocation"
+  ]
 }
