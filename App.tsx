@@ -10,6 +10,7 @@ import DriverLayout from './layouts/DriverLayout';
 import PassengerHome from './pages/passenger/PassengerHome';
 import PassengerMyRides from './pages/passenger/PassengerMyRides';
 import BookRide from './pages/passenger/BookRide';
+import GuestBookRide from './pages/GuestBookRide'; // Import the new component
 import DriverDashboard from './pages/driver/DriverDashboard';
 import DriverAvailability from './pages/driver/DriverAvailability';
 import DriverActiveRide from './pages/driver/DriverActiveRide';
@@ -51,6 +52,7 @@ const MainApp: React.FC = () => {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={!user ? <AuthPage /> : <Navigate to={user.role === 'passenger' ? '/passenger/home' : '/driver/dashboard'} />} />
         <Route path="/register" element={!user ? <AuthPage isRegister /> : <Navigate to={user.role === 'passenger' ? '/passenger/home' : '/driver/dashboard'} />} />
+        <Route path="/book" element={<GuestBookRide />} />
 
         {/* Passenger Routes */}
         <Route path="/passenger" element={

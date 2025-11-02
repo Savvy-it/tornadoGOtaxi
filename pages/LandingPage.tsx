@@ -31,7 +31,7 @@ const LandingPage: React.FC = () => {
             Book a ride in seconds or earn driving with Tornado Taxi. Safe, reliable, and always available.
           </p>
           <div className="flex flex-col sm:flex-row justify-center gap-4">
-            <Button variant="primary" onClick={() => navigate('/login')}>Book a Ride</Button>
+            <Button variant="primary" onClick={() => navigate('/book')}>Book a Ride</Button>
             <Button variant="secondary" onClick={() => navigate('/login')}>Become a Driver</Button>
           </div>
         </div>

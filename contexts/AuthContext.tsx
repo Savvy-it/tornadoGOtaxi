@@ -1,5 +1,5 @@
 import React, { createContext, useState, useContext, useEffect, ReactNode } from 'react';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient, User as SupabaseUser } from '@supabase/supabase-js';
 import { User, UserRole } from '../types';
 
 // IMPORTANT: Replace these placeholders with your actual Supabase project URL and Anon Key.
@@ -20,12 +20,84 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY && SUPABASE_URL !== "https://your-project-
   supabase = {} as SupabaseClient;
 }
 
+// Helper function to fetch or create a user profile
+const getOrCreateUserProfile = async (authUser: SupabaseUser): Promise<User | null> => {
+    // First, try to fetch the existing profile.
+    const { data: existingProfile, error: selectError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+
+    if (existingProfile) {
+        return existingProfile as User;
+    }
+
+    // If profile is not found (PGRST116), or if there's any other select error,
+    // we proceed to the fallback creation. This makes the system more resilient.
+    if (selectError) {
+        if (selectError.code === 'PGRST116') {
+             console.warn('User profile not found. Attempting to create one as a fallback.');
+        } else {
+             console.error('An unexpected error occurred while fetching user profile, attempting fallback creation:', selectError.message);
+        }
+
+        // --- ROBUST FALLBACK PROFILE CREATION ---
+        // This logic creates a profile if the backend trigger failed or for legacy users.
+        // It provides sensible defaults to satisfy database NOT NULL constraints.
+        const metadata = authUser.user_metadata || {};
+        const email = authUser.email;
+
+        if (!email) {
+            console.error('FATAL: Cannot create profile on fallback. Auth user has no email.');
+            return null;
+        }
+
+        // Use metadata if available, otherwise provide safe defaults.
+        const profileToInsert = {
+            id: authUser.id,
+            email,
+            full_name: metadata.full_name || email.split('@')[0] || 'Tornado Taxi User',
+            phone: metadata.phone || '000-000-0000', // Placeholder for legacy users or sync issues
+            role: metadata.role || UserRole.PASSENGER, // Default to passenger for safety
+        };
+        
+        // Pre-emptive check to ensure all required fields have valid, non-empty values.
+        // This prevents insertion failures due to NOT NULL or CHECK constraints, which can
+        // sometimes return misleading error messages from the database.
+        if (!profileToInsert.id || !profileToInsert.email || !profileToInsert.full_name || !profileToInsert.phone) {
+             console.error('CRITICAL: Fallback profile creation aborted due to missing data.', profileToInsert);
+             return null;
+        }
+
+        console.log('Attempting to insert fallback profile with data:', profileToInsert);
+
+        const { data: newProfile, error: insertError } = await supabase
+            .from('users')
+            .insert(profileToInsert)
+            .select()
+            .single();
+        
+        if (insertError) {
+            // This will give a clear reason if RLS policies are blocking the insert.
+            console.error('CRITICAL: Fallback profile creation failed during insert:', insertError.message, insertError);
+            return null;
+        }
+
+        console.log('Fallback profile creation successful.');
+        return newProfile as User;
+    }
+    
+    // This case should ideally not be reached if selectError is handled above, but as a safeguard:
+    return null;
+};
+
+
 interface AuthContextType {
   user: User | null;
   login: (email: string, password: string) => Promise<any>;
   logout: () => Promise<any>;
   register: (fullName: string, email: string, phone: string, role: UserRole, password: string) => Promise<any>;
-  resendConfirmationEmail: (email: string) => Promise<void>;
   loading: boolean;
 }
 
@@ -51,17 +123,8 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     const getSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
-        const { data: userProfile, error } = await supabase
-          .from('users')
-          .select('*')
-          .eq('id', session.user.id)
-          .single();
-
-        if (error) {
-          console.error('Error fetching user profile:', error);
-        } else {
-          setUser(userProfile as User);
-        }
+        const userProfile = await getOrCreateUserProfile(session.user);
+        setUser(userProfile); // setUser can accept null
       }
       setLoading(false);
     };
@@ -70,13 +133,8 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
 
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session) {
-        const { data: userProfile, error } = await supabase
-          .from('users')
-          .select('*')
-          .eq('id', session.user.id)
-          .single();
-        if (error) console.error('Error fetching user profile:', error);
-        else setUser(userProfile as User);
+        const userProfile = await getOrCreateUserProfile(session.user);
+        setUser(userProfile);
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
       }
@@ -88,8 +146,21 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   }, []);
 
   const login = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data: authData, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
+    
+    if (authData.user) {
+        const userProfile = await getOrCreateUserProfile(authData.user);
+        if (userProfile) {
+            setUser(userProfile);
+        } else {
+            // If profile fetch/create fails, we can't log the user in.
+            await supabase.auth.signOut();
+            throw new Error('Could not retrieve or create user profile. Please contact support.');
+        }
+    } else {
+         throw new Error('Login failed: No user data returned.');
+    }
   };
 
   const logout = async () => {
@@ -129,15 +200,10 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
         throw new Error("Registration failed: no user returned from Supabase.");
     }
   };
-  
-  const resendConfirmationEmail = async (email: string) => {
-    const { error } = await supabase.auth.resend({ type: 'signup', email });
-    if (error) throw error;
-  };
 
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, register, resendConfirmationEmail, loading }}>
+    <AuthContext.Provider value={{ user, login, logout, register, loading }}>
       {!loading && children}
     </AuthContext.Provider>
   );

@@ -8,6 +8,7 @@ interface DataContextType {
   acceptRide: (rideId: string) => Promise<void>;
   declineRide: (rideId: string) => void;
   requestRide: (from: string, to: string) => Promise<void>;
+  requestRideAsGuest: (from: string, to: string, email: string, name: string) => Promise<void>;
   getActiveRide: () => Ride | undefined;
   getMessages: (rideId: string) => Promise<Message[]>;
   sendMessage: (rideId: string, content: string) => Promise<void>;
@@ -115,9 +116,55 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           console.error("Error requesting ride:", error);
           throw error;
       }
-      alert("Ride requested! A driver will be matched shortly.");
+      // alert("Ride requested! A driver will be matched shortly."); // UI will handle this
       // Realtime will trigger a refetch
   };
+
+  const requestRideAsGuest = async (from: string, to: string, email: string, name: string) => {
+    const tempPassword = Math.random().toString(36).slice(-12);
+    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email,
+        password: tempPassword,
+        options: {
+            data: {
+                full_name: name,
+                phone: '000-000-0000', // Placeholder as guests don't provide a phone number
+                role: UserRole.PASSENGER,
+            },
+        },
+    });
+
+    if (signUpError) {
+        if (signUpError.message.toLowerCase().includes('user already registered')) {
+            throw new Error('An account with this email already exists. Please sign in to book a ride.');
+        }
+        console.error('Error during guest sign-up:', signUpError);
+        throw new Error('Could not create a temporary account for booking. Please try again.');
+    }
+
+    if (!signUpData.user) {
+        throw new Error('Registration failed: no user returned from Supabase.');
+    }
+    
+    const passengerId = signUpData.user.id;
+
+    const newRide = {
+        passenger_id: passengerId,
+        from_address: from,
+        to_address: to,
+        duration: Math.floor(Math.random() * 20) + 10,
+        distance: Math.round((Math.random() * 8 + 2) * 10) / 10,
+        amount: Math.round((Math.random() * 15 + 10) * 100) / 100,
+        status: RideStatus.PENDING,
+    };
+    
+    const { error: insertError } = await supabase.from('rides').insert(newRide);
+    if (insertError) {
+        console.error("Error requesting ride for guest:", insertError.message, insertError);
+        throw new Error('Your ride could not be booked due to a server error. Please try again.');
+    }
+  };
+
 
   const getActiveRide = useCallback((): Ride | undefined => {
     if(!user) return undefined;
@@ -155,7 +202,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
 
   return (
-    <DataContext.Provider value={{ rides, pendingRequests, acceptRide, declineRide, requestRide, getActiveRide, getMessages, sendMessage }}>
+    <DataContext.Provider value={{ rides, pendingRequests, acceptRide, declineRide, requestRide, requestRideAsGuest, getActiveRide, getMessages, sendMessage }}>
       {children}
     </DataContext.Provider>
   );

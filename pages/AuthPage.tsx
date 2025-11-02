@@ -15,59 +15,30 @@ const AuthForm: React.FC<{ isRegister: boolean }> = ({ isRegister }) => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [emailNotConfirmed, setEmailNotConfirmed] = useState(false);
 
-  const { login, register, resendConfirmationEmail } = useAuth();
+  const { login, register } = useAuth();
   const navigate = useNavigate();
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    setSuccessMessage(null);
-    setEmailNotConfirmed(false);
     try {
       if (isRegister) {
         if(password !== confirmPassword) {
           throw new Error("Passwords do not match");
         }
         await register(fullName, email, phone, role, password);
-        setSuccessMessage("Registration successful! Please check your email for a confirmation link to sign in.");
+        // On successful registration, the onAuthStateChange listener in AuthContext
+        // will handle setting the user and the router will automatically redirect.
+        // No success message is needed here for a seamless experience.
       } else {
         await login(email, password);
-        // The onAuthStateChange listener in AuthContext will handle navigation indirectly
-        // by updating the user state which triggers routing logic in App.tsx.
-        // So no explicit navigate() here is needed for a robust setup, but we'll keep it for simplicity.
-        navigate(role === UserRole.PASSENGER ? '/passenger/home' : '/driver/dashboard');
+        // After login, the AuthContext state will update,
+        // and the router in App.tsx will automatically redirect.
       }
     } catch (err: any) {
-      if (!isRegister && err.message && err.message.toLowerCase().includes('email not confirmed')) {
-          setEmailNotConfirmed(true);
-          setError("Your email address is not confirmed. Please check your inbox or resend the confirmation email.");
-      } else {
-          setError(err.message || 'An unexpected error occurred.');
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleResendEmail = async () => {
-    if (!email) {
-      setError("Please enter your email address to resend the confirmation.");
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    setSuccessMessage(null);
-    try {
-      await resendConfirmationEmail(email);
-      setSuccessMessage("A new confirmation email has been sent. Please check your inbox.");
-      setEmailNotConfirmed(false); // Hide the button after successful send
-    } catch (err: any) {
-      setError(err.message || 'Failed to resend email.');
-      setEmailNotConfirmed(true); // Keep the button if it fails
+      setError(err.message || 'An unexpected error occurred.');
     } finally {
       setLoading(false);
     }
@@ -87,22 +58,8 @@ const AuthForm: React.FC<{ isRegister: boolean }> = ({ isRegister }) => {
 
   return (
     <form onSubmit={handleAuth} className="space-y-6">
-      {(error || successMessage) && (
-        <div className="space-y-4">
-          {error && <p className={`p-3 rounded-lg text-sm ${emailNotConfirmed ? 'text-yellow-300 bg-yellow-500/10' : 'text-red-400 bg-red-500/10'}`}>{error}</p>}
-          {successMessage && <p className="text-green-400 bg-green-500/10 p-3 rounded-lg text-sm">{successMessage}</p>}
-          
-          {!isRegister && emailNotConfirmed && (
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={handleResendEmail}
-              disabled={loading}
-            >
-              {loading ? 'Sending...' : 'Resend Confirmation Email'}
-            </Button>
-          )}
-        </div>
+      {error && (
+        <p className="p-3 rounded-lg text-sm text-red-400 bg-red-500/10">{error}</p>
       )}
 
       <div>
